@@ -21,7 +21,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     if (!exportState.downloadUrl) return;
     const a = document.createElement('a');
     a.href = exportState.downloadUrl;
-    a.download = exportState.downloadFilename || 'scrubbed-video.webm';
+    a.download = exportState.downloadFilename || 'scrubbed-video.mp4';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -125,9 +125,14 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
 
             <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800/60 border border-slate-700/60 text-xs font-mono text-slate-300">
-              <span className="truncate max-w-[200px]" title={exportState.downloadFilename}>
-                {exportState.downloadFilename}
-              </span>
+              <div className="flex items-center gap-2 truncate">
+                <span className="px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 text-[10px] font-semibold uppercase">
+                  {exportState.downloadFilename.split('.').pop() || 'MP4'}
+                </span>
+                <span className="truncate max-w-[190px]" title={exportState.downloadFilename}>
+                  {exportState.downloadFilename}
+                </span>
+              </div>
               <span className="text-slate-400">{formatBytes(exportState.blobSize)}</span>
             </div>
 
@@ -138,7 +143,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 className="flex-1 py-2.5 px-4 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs transition-all shadow-md shadow-sky-600/25 flex items-center justify-center gap-2"
               >
                 <Download className="w-4 h-4" />
-                <span>Download Clean Video</span>
+                <span>Download Clean Video (.{exportState.downloadFilename.split('.').pop()?.toLowerCase() || 'mp4'})</span>
               </button>
               <button
                 onClick={onClose}

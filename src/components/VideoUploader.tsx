@@ -20,7 +20,8 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({
 
   const handleFile = (file: File) => {
     setError(null);
-    if (!file.type.startsWith('video/')) {
+    const isVideoExtension = /\.(mp4|webm|mov|m4v|mkv|avi)$/i.test(file.name);
+    if (!file.type.startsWith('video/') && !isVideoExtension) {
       setError('Please select a valid video file (MP4, WebM, MOV)');
       return;
     }

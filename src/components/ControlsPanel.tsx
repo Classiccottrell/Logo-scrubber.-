@@ -8,9 +8,12 @@ import {
   Eye,
   Crosshair,
   Info,
+  Film,
+  Check,
 } from 'lucide-react';
-import { ScrubMethod, ScrubSettings, TrimRange, WatermarkZone } from '../types';
+import { ExportFormatChoice, ScrubMethod, ScrubSettings, TrimRange, VideoMetadata, WatermarkZone } from '../types';
 import { WATERMARK_PRESETS } from '../utils/watermarkPresets';
+import { detectSourceExtension } from '../utils/videoExporter';
 import { GeminiLogo } from './GeminiLogo';
 
 interface ControlsPanelProps {
@@ -20,6 +23,9 @@ interface ControlsPanelProps {
   onStartExport: () => void;
   onTakeSnapshot: () => void;
   isExporting: boolean;
+  videoMeta: VideoMetadata | null;
+  exportFormat: ExportFormatChoice;
+  onSelectExportFormat: (format: ExportFormatChoice) => void;
 }
 
 export const ControlsPanel: React.FC<ControlsPanelProps> = ({
@@ -29,8 +35,13 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
   onStartExport,
   onTakeSnapshot,
   isExporting,
+  videoMeta,
+  exportFormat,
+  onSelectExportFormat,
 }) => {
   const segmentDuration = Math.max(0, trimRange.end - trimRange.start);
+  const sourceExt = videoMeta ? detectSourceExtension(videoMeta) : 'mp4';
+  const effectiveExt = exportFormat === 'source' ? sourceExt : exportFormat;
 
   const applyPreset = (presetId: string) => {
     const preset = WATERMARK_PRESETS.find((p) => p.id === presetId);
@@ -388,8 +399,69 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
           </div>
         </div>
 
-        {/* Section 5: Primary Action Buttons */}
-        <div className="pt-2 space-y-2">
+        {/* Section 5: Primary Action Buttons & Output Format */}
+        <div className="pt-2 space-y-3">
+          {/* Export Format Selector */}
+          <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                <Film className="w-3.5 h-3.5 text-sky-400" />
+                <span>Export Format</span>
+              </span>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-sky-500/10 text-sky-300 border border-sky-500/30 flex items-center gap-1">
+                <Check className="w-2.5 h-2.5 text-sky-400" />
+                <span>Input: .{sourceExt}</span>
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+              <button
+                type="button"
+                id="format-source-btn"
+                onClick={() => onSelectExportFormat('source')}
+                className={`px-2 py-2 rounded-lg text-xs font-medium text-center transition-all ${
+                  exportFormat === 'source'
+                    ? 'bg-sky-600 text-white shadow-sm shadow-sky-600/30 font-semibold'
+                    : 'bg-slate-800/90 text-slate-400 hover:text-slate-200 hover:bg-slate-750'
+                }`}
+              >
+                <div className="text-[11px] leading-tight font-medium">Match Source</div>
+                <div className="text-[10px] font-mono opacity-80 uppercase mt-0.5">.{sourceExt}</div>
+              </button>
+
+              <button
+                type="button"
+                id="format-mp4-btn"
+                onClick={() => onSelectExportFormat('mp4')}
+                className={`px-2 py-2 rounded-lg text-xs font-medium text-center transition-all ${
+                  exportFormat === 'mp4'
+                    ? 'bg-sky-600 text-white shadow-sm shadow-sky-600/30 font-semibold'
+                    : 'bg-slate-800/90 text-slate-400 hover:text-slate-200 hover:bg-slate-750'
+                }`}
+              >
+                <div className="text-[11px] leading-tight font-medium">MP4 Video</div>
+                <div className="text-[10px] font-mono opacity-80 mt-0.5">.mp4</div>
+              </button>
+
+              <button
+                type="button"
+                id="format-webm-btn"
+                onClick={() => onSelectExportFormat('webm')}
+                className={`px-2 py-2 rounded-lg text-xs font-medium text-center transition-all ${
+                  exportFormat === 'webm'
+                    ? 'bg-sky-600 text-white shadow-sm shadow-sky-600/30 font-semibold'
+                    : 'bg-slate-800/90 text-slate-400 hover:text-slate-200 hover:bg-slate-750'
+                }`}
+              >
+                <div className="text-[11px] leading-tight font-medium">WebM Video</div>
+                <div className="text-[10px] font-mono opacity-80 mt-0.5">.webm</div>
+              </button>
+            </div>
+            <div className="text-[10px] text-slate-400">
+              Output will be generated as <span className="font-mono text-sky-300 font-semibold">.{effectiveExt}</span> (matches input video format).
+            </div>
+          </div>
+
           <button
             id="start-export-btn"
             onClick={onStartExport}
@@ -397,7 +469,7 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
             className="w-full py-3 px-4 rounded-xl bg-sky-600 hover:bg-sky-500 active:scale-[0.99] text-white font-semibold text-sm transition-all shadow-md shadow-sky-600/25 flex items-center justify-center gap-2 disabled:opacity-50"
           >
             <Download className="w-4 h-4" />
-            <span>Export Scrubbed Segment</span>
+            <span>Export Clean Video (.{effectiveExt})</span>
             <span className="text-xs text-sky-200 font-mono bg-sky-700/50 px-2 py-0.5 rounded">
               {segmentDuration.toFixed(1)}s
             </span>

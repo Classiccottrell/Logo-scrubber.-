@@ -44,6 +44,8 @@ export interface TrimRange {
 
 export type ViewMode = 'split' | 'scrubbed' | 'side_by_side' | 'original';
 
+export type ExportFormatChoice = 'source' | 'mp4' | 'webm' | 'mov';
+
 export interface ExportState {
   isExporting: boolean;
   progress: number;        // 0 to 100
@@ -55,6 +57,7 @@ export interface ExportState {
   downloadUrl: string | null;
   downloadFilename: string;
   blobSize: number;
+  outputFormat?: string;
   error: string | null;
 }
 

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { ScrubSettings, VideoMetadata, ViewMode, TrimRange, ExportState } from './types';
+import { ScrubSettings, VideoMetadata, ViewMode, TrimRange, ExportState, ExportFormatChoice } from './types';
 import { Header } from './components/Header';
 import { VideoCanvasPlayer } from './components/VideoCanvasPlayer';
 import { TimelineBar } from './components/TimelineBar';
@@ -54,6 +54,7 @@ export default function App() {
   const [volume, setVolume] = useState<number>(0.75);
 
   const [isLoadingSample, setIsLoadingSample] = useState<boolean>(false);
+  const [exportFormat, setExportFormat] = useState<ExportFormatChoice>('source');
   const [exportState, setExportState] = useState<ExportState>(INITIAL_EXPORT_STATE);
   const abortExportRef = useRef<{ aborted: boolean }>({ aborted: false });
 
@@ -218,6 +219,14 @@ export default function App() {
       videoRef.current.pause();
       setIsPlaying(false);
     }
+    // Clean up previous blob URL if needed
+    if (videoMeta?.url && videoMeta.url.startsWith('blob:')) {
+      try {
+        URL.revokeObjectURL(videoMeta.url);
+      } catch {
+        // Ignore
+      }
+    }
     setVideoMeta(meta);
     setDuration(meta.duration);
     const maxSegment = Math.min(meta.duration, 10);
@@ -258,28 +267,28 @@ export default function App() {
     });
 
     try {
-      const scrubbedBlob = await exportScrubbedVideo(
+      const result = await exportScrubbedVideo(
         videoMeta,
         settings,
         trimRange,
+        exportFormat,
         (progressUpdates) => {
           setExportState((prev) => ({ ...prev, ...progressUpdates }));
         },
         abortExportRef.current
       );
 
-      const downloadUrl = URL.createObjectURL(scrubbedBlob);
-      const baseName = videoMeta.name.replace(/\.[^/.]+$/, '') || 'video-segment';
-      const cleanFilename = `${baseName}-scrubbed.webm`;
+      const downloadUrl = URL.createObjectURL(result.blob);
 
       setExportState((prev) => ({
         ...prev,
         isExporting: false,
         progress: 100,
         downloadUrl,
-        downloadFilename: cleanFilename,
-        blobSize: scrubbedBlob.size,
-        statusText: 'Scrubbed video ready!',
+        downloadFilename: result.filename,
+        blobSize: result.blob.size,
+        outputFormat: result.formatLabel,
+        statusText: `Clean video ready (${result.extension.toUpperCase()})!`,
       }));
     } catch (err: unknown) {
       if ((err as Error)?.message?.includes('cancelled')) {
@@ -326,6 +335,10 @@ export default function App() {
                 sizeBytes: file.size,
               });
             };
+            temp.onerror = () => {
+              URL.revokeObjectURL(url);
+            };
+            e.target.value = '';
           }
         }}
       />
@@ -357,7 +370,7 @@ export default function App() {
                 isPlaying={isPlaying}
                 currentTime={currentTime}
                 onTimeUpdate={handleTimeUpdate}
-                onDurationChange={(d) => {
+                onDurationChange={(d: number) => {
                   setDuration(d);
                   setTrimRange((prev) => ({
                     start: prev.start,
@@ -391,6 +404,9 @@ export default function App() {
               onStartExport={handleStartExport}
               onTakeSnapshot={handleTakeSnapshot}
               isExporting={exportState.isExporting}
+              videoMeta={videoMeta}
+              exportFormat={exportFormat}
+              onSelectExportFormat={setExportFormat}
             />
           </>
         ) : (

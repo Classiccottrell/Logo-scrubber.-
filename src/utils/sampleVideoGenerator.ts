@@ -45,13 +45,24 @@ export async function generateSampleVideo(
     canvasStream.addTrack(audioDest.stream.getAudioTracks()[0]);
   }
 
-  // Choose supported mimeType
-  let mimeType = 'video/webm;codecs=vp9';
-  if (!MediaRecorder.isTypeSupported(mimeType)) {
+  // Choose supported mimeType prioritizing MP4 for universal compatibility
+  let mimeType = 'video/mp4;codecs=avc1';
+  let extension = 'mp4';
+  if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')) {
+    mimeType = 'video/mp4;codecs=avc1';
+    extension = 'mp4';
+  } else if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('video/mp4')) {
+    mimeType = 'video/mp4';
+    extension = 'mp4';
+  } else if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) {
+    mimeType = 'video/webm;codecs=vp9';
+    extension = 'webm';
+  } else if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) {
     mimeType = 'video/webm;codecs=vp8';
-    if (!MediaRecorder.isTypeSupported(mimeType)) {
-      mimeType = 'video/webm';
-    }
+    extension = 'webm';
+  } else {
+    mimeType = 'video/webm';
+    extension = 'webm';
   }
 
   const recorder = new MediaRecorder(canvasStream, {
@@ -88,14 +99,19 @@ export async function generateSampleVideo(
   const videoBlob = await recordingPromise;
   const url = URL.createObjectURL(videoBlob);
 
-  const file = new File([videoBlob], type === 'social_reel' ? 'sample-social-reel.webm' : 'sample-stock-clip.webm', {
+  const sampleFileName =
+    type === 'social_reel'
+      ? `gemini-sample-reel.${extension}`
+      : `sample-stock-clip.${extension}`;
+
+  const file = new File([videoBlob], sampleFileName, {
     type: mimeType,
   });
 
   return {
     file,
     url,
-    name: type === 'social_reel' ? 'Gemini Sample (Bottom-Right Watermark)' : 'Sample Stock Clip (Corner Watermark)',
+    name: sampleFileName,
     duration: durationSec,
     width,
     height,

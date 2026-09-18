@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Play,
   Pause,
@@ -52,6 +52,9 @@ export const TimelineBar: React.FC<TimelineBarProps> = ({
   onVolumeChange,
 }) => {
   const trackRef = useRef<HTMLDivElement>(null);
+  const [isScrubbing, setIsScrubbing] = useState<boolean>(false);
+  const [hoverTime, setHoverTime] = useState<number | null>(null);
+  const [hoverX, setHoverX] = useState<number>(0);
 
   const safeDuration = Math.max(0.1, duration);
   const playheadPercent = Math.min(100, Math.max(0, (currentTime / safeDuration) * 100));
@@ -61,14 +64,69 @@ export const TimelineBar: React.FC<TimelineBarProps> = ({
 
   const seekTo = (seconds: number) => {
     if (!videoRef.current) return;
-    videoRef.current.currentTime = Math.max(0, Math.min(safeDuration, seconds));
+    const clamped = Math.max(0, Math.min(safeDuration, seconds));
+    videoRef.current.currentTime = clamped;
   };
 
-  const handleTrackClick = (e: React.MouseEvent<HTMLDivElement>) => {
+  // Interactive timeline dragging / scrubbing
+  const startTrackScrub = (clientX: number) => {
+    if (!trackRef.current) return;
+    setIsScrubbing(true);
+
+    const seekFromEvent = (cx: number) => {
+      if (!trackRef.current) return;
+      const rect = trackRef.current.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (cx - rect.left) / rect.width));
+      seekTo(ratio * safeDuration);
+    };
+
+    seekFromEvent(clientX);
+
+    const onMove = (moveEv: MouseEvent) => {
+      seekFromEvent(moveEv.clientX);
+    };
+
+    const onTouchMove = (touchEv: TouchEvent) => {
+      if (touchEv.touches.length > 0) {
+        seekFromEvent(touchEv.touches[0].clientX);
+      }
+    };
+
+    const onUp = () => {
+      setIsScrubbing(false);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onUp);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('touchmove', onTouchMove, { passive: true });
+    window.addEventListener('touchend', onUp);
+  };
+
+  const handleTrackMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    startTrackScrub(e.clientX);
+  };
+
+  const handleTrackTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length > 0) {
+      startTrackScrub(e.touches[0].clientX);
+    }
+  };
+
+  const handleTrackMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!trackRef.current) return;
     const rect = trackRef.current.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    seekTo(ratio * safeDuration);
+    setHoverTime(ratio * safeDuration);
+    setHoverX(e.clientX - rect.left);
+  };
+
+  const handleTrackMouseLeave = () => {
+    setHoverTime(null);
   };
 
   const stepFrame = (frames: number) => {
@@ -97,14 +155,18 @@ export const TimelineBar: React.FC<TimelineBarProps> = ({
 
         <div
           ref={trackRef}
-          onClick={handleTrackClick}
-          className="relative flex-1 h-7 flex items-center cursor-pointer group"
+          onMouseDown={handleTrackMouseDown}
+          onTouchStart={handleTrackTouchStart}
+          onMouseMove={handleTrackMouseMove}
+          onMouseLeave={handleTrackMouseLeave}
+          className="relative flex-1 h-8 flex items-center cursor-pointer group touch-none"
+          title="Click and drag to scrub through video timeline"
         >
           {/* Base track background */}
-          <div className="absolute inset-x-0 h-2 bg-slate-800 rounded-full overflow-hidden">
+          <div className="absolute inset-x-0 h-2.5 bg-slate-800 rounded-full overflow-hidden">
             {/* Trim segment active range highlight */}
             <div
-              className="absolute top-0 bottom-0 bg-sky-500/30 border-x border-sky-400/50"
+              className="absolute top-0 bottom-0 bg-sky-500/30 border-x border-sky-400/60"
               style={{
                 left: `${trimStartPercent}%`,
                 width: `${Math.max(1, trimEndPercent - trimStartPercent)}%`,
@@ -114,16 +176,15 @@ export const TimelineBar: React.FC<TimelineBarProps> = ({
 
           {/* Progress bar up to current playhead */}
           <div
-            className="absolute h-2 bg-sky-500 rounded-l-full pointer-events-none"
+            className="absolute h-2.5 bg-sky-500 rounded-l-full pointer-events-none"
             style={{ width: `${playheadPercent}%` }}
           />
 
           {/* Trim In Marker */}
           <div
-            className="absolute top-0 bottom-0 w-2.5 -translate-x-1/2 flex flex-col items-center justify-between cursor-ew-resize group/in z-10"
+            className="absolute top-0 bottom-0 w-3 -translate-x-1/2 flex flex-col items-center justify-between cursor-ew-resize group/in z-10"
             style={{ left: `${trimStartPercent}%` }}
-            title={`Trim In: ${formatTimecode(trimRange.start)}`}
-            onClick={(e) => e.stopPropagation()}
+            title={`Trim In Point: ${formatTimecode(trimRange.start)}`}
             onMouseDown={(e) => {
               e.stopPropagation();
               const onMove = (moveEv: MouseEvent) => {
@@ -144,15 +205,14 @@ export const TimelineBar: React.FC<TimelineBarProps> = ({
               window.addEventListener('mouseup', onUp);
             }}
           >
-            <div className="w-1.5 h-full bg-amber-400 rounded-sm shadow-sm" />
+            <div className="w-1.5 h-full bg-amber-400 rounded-sm shadow-sm hover:scale-110 transition-transform" />
           </div>
 
           {/* Trim Out Marker */}
           <div
-            className="absolute top-0 bottom-0 w-2.5 -translate-x-1/2 flex flex-col items-center justify-between cursor-ew-resize group/out z-10"
+            className="absolute top-0 bottom-0 w-3 -translate-x-1/2 flex flex-col items-center justify-between cursor-ew-resize group/out z-10"
             style={{ left: `${trimEndPercent}%` }}
-            title={`Trim Out: ${formatTimecode(trimRange.end)}`}
-            onClick={(e) => e.stopPropagation()}
+            title={`Trim Out Point: ${formatTimecode(trimRange.end)}`}
             onMouseDown={(e) => {
               e.stopPropagation();
               const onMove = (moveEv: MouseEvent) => {
@@ -173,16 +233,28 @@ export const TimelineBar: React.FC<TimelineBarProps> = ({
               window.addEventListener('mouseup', onUp);
             }}
           >
-            <div className="w-1.5 h-full bg-amber-400 rounded-sm shadow-sm" />
+            <div className="w-1.5 h-full bg-amber-400 rounded-sm shadow-sm hover:scale-110 transition-transform" />
           </div>
 
           {/* Playhead indicator */}
           <div
-            className="absolute w-3.5 h-5 bg-white rounded-sm shadow-md -translate-x-1/2 pointer-events-none flex items-center justify-center z-20"
+            className={`absolute w-4 h-6 bg-white rounded-sm shadow-lg -translate-x-1/2 flex items-center justify-center z-20 transition-transform ${
+              isScrubbing ? 'scale-125 ring-2 ring-sky-400' : 'group-hover:scale-110'
+            }`}
             style={{ left: `${playheadPercent}%` }}
           >
-            <div className="w-0.5 h-3 bg-slate-900 rounded" />
+            <div className="w-0.5 h-3.5 bg-slate-900 rounded" />
           </div>
+
+          {/* Hover timestamp tooltip */}
+          {hoverTime !== null && !isScrubbing && (
+            <div
+              className="absolute -top-7 px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-mono text-sky-300 border border-slate-700 pointer-events-none -translate-x-1/2 z-30"
+              style={{ left: `${hoverX}px` }}
+            >
+              {formatTimecode(hoverTime)}
+            </div>
+          )}
         </div>
 
         <span className="text-xs font-mono text-slate-400 min-w-[62px] text-right">

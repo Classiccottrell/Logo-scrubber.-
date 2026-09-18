@@ -1,13 +1,149 @@
-import { ExportState, ScrubSettings, TrimRange, VideoMetadata } from '../types';
+import { ExportFormatChoice, ExportState, ScrubSettings, TrimRange, VideoMetadata } from '../types';
 import { applyWatermarkScrub } from './watermarkEngine';
+import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
+
+export interface ExportResult {
+  blob: Blob;
+  filename: string;
+  extension: string;
+  mimeType: string;
+  formatLabel: string;
+}
+
+/**
+ * Detects the input video extension from file name or MIME type.
+ * Defaults to 'mp4' if unknown, matching the most common standard.
+ */
+export function detectSourceExtension(videoMeta: VideoMetadata): string {
+  const match = videoMeta.name.match(/\.([a-zA-Z0-9]+)$/);
+  if (match) {
+    const ext = match[1].toLowerCase();
+    if (['mp4', 'mov', 'webm', 'm4v', 'mkv', 'avi'].includes(ext)) {
+      return ext;
+    }
+  }
+  if (videoMeta.file?.type) {
+    const type = videoMeta.file.type.toLowerCase();
+    if (type.includes('mp4')) return 'mp4';
+    if (type.includes('quicktime')) return 'mov';
+    if (type.includes('webm')) return 'webm';
+    if (type.includes('x-m4v')) return 'm4v';
+  }
+  return 'mp4';
+}
+
+/**
+ * Determine supported codec & container for the requested export format
+ */
+export function resolveExportCodec(preferredExt: string): {
+  mimeType: string;
+  actualExt: string;
+  formatLabel: string;
+  useWebCodecsMuxer: boolean;
+} {
+  const isMp4Target = preferredExt === 'mp4' || preferredExt === 'mov' || preferredExt === 'm4v';
+
+  if (isMp4Target) {
+    const candidates = [
+      'video/mp4;codecs=avc1',
+      'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+      'video/mp4;codecs=h264',
+      'video/mp4',
+    ];
+    if (preferredExt === 'mov') {
+      candidates.unshift('video/quicktime');
+    }
+
+    if (typeof MediaRecorder !== 'undefined') {
+      for (const cand of candidates) {
+        if (MediaRecorder.isTypeSupported(cand)) {
+          return {
+            mimeType: cand,
+            actualExt: preferredExt,
+            formatLabel: preferredExt.toUpperCase(),
+            useWebCodecsMuxer: false,
+          };
+        }
+      }
+    }
+
+    // Fallback: If browser MediaRecorder does not support MP4, but WebCodecs VideoEncoder is available
+    if (typeof VideoEncoder !== 'undefined') {
+      return {
+        mimeType: 'video/mp4',
+        actualExt: preferredExt,
+        formatLabel: `${preferredExt.toUpperCase()} (H.264 WebCodecs)`,
+        useWebCodecsMuxer: true,
+      };
+    }
+  }
+
+  // WebM candidates
+  const webmCandidates = [
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8,opus',
+    'video/webm;codecs=vp8',
+    'video/webm',
+  ];
+
+  if (typeof MediaRecorder !== 'undefined') {
+    for (const cand of webmCandidates) {
+      if (MediaRecorder.isTypeSupported(cand)) {
+        return {
+          mimeType: cand,
+          actualExt: isMp4Target ? preferredExt : 'webm',
+          formatLabel: isMp4Target ? `${preferredExt.toUpperCase()} (WebM Container)` : 'WebM (VP9)',
+          useWebCodecsMuxer: false,
+        };
+      }
+    }
+  }
+
+  return {
+    mimeType: 'video/webm',
+    actualExt: preferredExt || 'webm',
+    formatLabel: 'WebM',
+    useWebCodecsMuxer: false,
+  };
+}
 
 export async function exportScrubbedVideo(
   videoMeta: VideoMetadata,
   settings: ScrubSettings,
   trimRange: TrimRange,
+  formatChoice: ExportFormatChoice = 'source',
   onProgress: (state: Partial<ExportState>) => void,
   abortSignal?: { aborted: boolean }
-): Promise<Blob> {
+): Promise<ExportResult> {
+  const sourceExt = detectSourceExtension(videoMeta);
+  const targetExt = formatChoice === 'source' ? sourceExt : formatChoice;
+  const codecInfo = resolveExportCodec(targetExt);
+
+  const baseName = videoMeta.name.replace(/\.[^/.]+$/, '') || 'video-segment';
+  const cleanFilename = `${baseName}-scrubbed.${codecInfo.actualExt}`;
+
+  // If WebCodecs fallback is selected for MP4
+  if (codecInfo.useWebCodecsMuxer) {
+    try {
+      const blob = await exportWithMp4Muxer(videoMeta, settings, trimRange, onProgress, abortSignal);
+      return {
+        blob,
+        filename: cleanFilename,
+        extension: codecInfo.actualExt,
+        mimeType: 'video/mp4',
+        formatLabel: codecInfo.formatLabel,
+      };
+    } catch (muxerErr) {
+      if ((muxerErr as Error)?.message?.includes('cancelled')) {
+        throw muxerErr;
+      }
+      console.warn('WebCodecs MP4 muxer encountered an error, falling back to standard MediaRecorder:', muxerErr);
+      // Fall through to MediaRecorder export
+    }
+  }
+
+  // Standard high-performance MediaRecorder export
   return new Promise(async (resolve, reject) => {
     const video = document.createElement('video');
     video.src = videoMeta.url;
@@ -47,10 +183,9 @@ export async function exportScrubbedVideo(
       const sourceNode = audioCtx.createMediaElementSource(video);
       const destNode = audioCtx.createMediaStreamDestination();
       sourceNode.connect(destNode);
-      // Also connect to silent or don't connect to destination to avoid doubling speaker output during export
       audioStream = destNode.stream;
     } catch {
-      // Audio capture may not be supported for some cross-origin files; fallback to video-only
+      // Audio capture may not be supported for some cross-origin files
     }
 
     const canvasStream = exportCanvas.captureStream(fps);
@@ -58,17 +193,8 @@ export async function exportScrubbedVideo(
       canvasStream.addTrack(audioStream.getAudioTracks()[0]);
     }
 
-    // Determine codec
-    let mimeType = 'video/webm;codecs=vp9';
-    if (!MediaRecorder.isTypeSupported(mimeType)) {
-      mimeType = 'video/webm;codecs=vp8';
-      if (!MediaRecorder.isTypeSupported(mimeType)) {
-        mimeType = 'video/webm';
-      }
-    }
-
     const recorder = new MediaRecorder(canvasStream, {
-      mimeType,
+      mimeType: codecInfo.mimeType,
       videoBitsPerSecond: 8_000_000,
     });
 
@@ -83,8 +209,14 @@ export async function exportScrubbedVideo(
       }
       video.pause();
       video.src = '';
-      const finalBlob = new Blob(chunks, { type: mimeType });
-      resolve(finalBlob);
+      const finalBlob = new Blob(chunks, { type: codecInfo.mimeType });
+      resolve({
+        blob: finalBlob,
+        filename: cleanFilename,
+        extension: codecInfo.actualExt,
+        mimeType: codecInfo.mimeType,
+        formatLabel: codecInfo.formatLabel,
+      });
     };
 
     recorder.onerror = (err) => {
@@ -135,21 +267,19 @@ export async function exportScrubbedVideo(
         totalFrames,
         fps: Math.round(currentFps),
         estimatedSecondsLeft: estSecLeft,
-        statusText: `Scrubbing watermark... frame ${currentFrame} / ${totalFrames}`,
+        statusText: `Scrubbing watermark [${codecInfo.actualExt.toUpperCase()}]... frame ${currentFrame} / ${totalFrames}`,
       });
 
       // Advance video frame
       const nextTime = startSec + (currentFrame / fps);
       if (nextTime < endSec) {
         video.currentTime = nextTime;
-        // Wait for seeked event
         await new Promise<void>((r) => {
           const onSeeked = () => {
             video.removeEventListener('seeked', onSeeked);
             r();
           };
           video.addEventListener('seeked', onSeeked);
-          // Safety timeout
           setTimeout(() => {
             video.removeEventListener('seeked', onSeeked);
             r();
@@ -174,6 +304,125 @@ export async function exportScrubbedVideo(
 }
 
 /**
+ * Fallback MP4 exporter using WebCodecs VideoEncoder + mp4-muxer for browsers
+ * where MediaRecorder does not support video/mp4 (e.g. Firefox desktop).
+ */
+async function exportWithMp4Muxer(
+  videoMeta: VideoMetadata,
+  settings: ScrubSettings,
+  trimRange: TrimRange,
+  onProgress: (state: Partial<ExportState>) => void,
+  abortSignal?: { aborted: boolean }
+): Promise<Blob> {
+  const video = document.createElement('video');
+  video.src = videoMeta.url;
+  video.crossOrigin = 'anonymous';
+  video.muted = true;
+  video.playsInline = true;
+
+  await new Promise<void>((res, rej) => {
+    video.onloadedmetadata = () => res();
+    video.onerror = (e) => rej(new Error('Failed to load video source for MP4 export: ' + e));
+  });
+
+  const vWidth = videoMeta.width || video.videoWidth || 1280;
+  const vHeight = videoMeta.height || video.videoHeight || 720;
+  const fps = videoMeta.fps || 30;
+
+  const startSec = Math.max(0, trimRange.start);
+  const endSec = Math.min(video.duration, Math.max(startSec + 0.2, trimRange.end));
+  const duration = endSec - startSec;
+  const totalFrames = Math.max(1, Math.round(duration * fps));
+
+  const exportCanvas = document.createElement('canvas');
+  exportCanvas.width = vWidth;
+  exportCanvas.height = vHeight;
+  const ctx = exportCanvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) throw new Error('Failed to obtain canvas 2D context');
+
+  const target = new ArrayBufferTarget();
+  const muxer = new Muxer({
+    target,
+    video: {
+      codec: 'avc',
+      width: vWidth,
+      height: vHeight,
+    },
+    fastStart: 'in-memory',
+  });
+
+  const encoder = new VideoEncoder({
+    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+    error: (e) => console.error('VideoEncoder error:', e),
+  });
+
+  encoder.configure({
+    codec: 'avc1.42001f', // H.264 Baseline
+    width: vWidth,
+    height: vHeight,
+    bitrate: 6_000_000,
+    framerate: fps,
+  });
+
+  const startTime = performance.now();
+  video.currentTime = startSec;
+  await new Promise((r) => setTimeout(r, 100));
+
+  for (let currentFrame = 0; currentFrame < totalFrames; currentFrame++) {
+    if (abortSignal?.aborted) {
+      encoder.close();
+      throw new Error('Export cancelled by user');
+    }
+
+    ctx.drawImage(video, 0, 0, vWidth, vHeight);
+    applyWatermarkScrub(ctx, vWidth, vHeight, settings);
+
+    // Create VideoFrame and encode
+    const timestampMicros = Math.round(currentFrame * (1_000_000 / fps));
+    const videoFrame = new VideoFrame(exportCanvas, { timestamp: timestampMicros });
+    encoder.encode(videoFrame, { keyFrame: currentFrame % 30 === 0 });
+    videoFrame.close();
+
+    const progress = Math.min(99, Math.round(((currentFrame + 1) / totalFrames) * 100));
+    const elapsedSec = (performance.now() - startTime) / 1000;
+    const currentFps = elapsedSec > 0 ? (currentFrame + 1) / elapsedSec : fps;
+    const framesRemaining = Math.max(0, totalFrames - (currentFrame + 1));
+    const estSecLeft = currentFps > 0 ? Math.round(framesRemaining / currentFps) : 0;
+
+    onProgress({
+      progress,
+      currentFrame: currentFrame + 1,
+      totalFrames,
+      fps: Math.round(currentFps),
+      estimatedSecondsLeft: estSecLeft,
+      statusText: `Encoding MP4 frame ${currentFrame + 1} / ${totalFrames}`,
+    });
+
+    const nextTime = startSec + ((currentFrame + 1) / fps);
+    if (nextTime < endSec) {
+      video.currentTime = nextTime;
+      await new Promise<void>((r) => {
+        const onSeeked = () => {
+          video.removeEventListener('seeked', onSeeked);
+          r();
+        };
+        video.addEventListener('seeked', onSeeked);
+        setTimeout(() => {
+          video.removeEventListener('seeked', onSeeked);
+          r();
+        }, 60);
+      });
+    }
+  }
+
+  await encoder.flush();
+  encoder.close();
+  muxer.finalize();
+
+  return new Blob([target.buffer], { type: 'video/mp4' });
+}
+
+/**
  * Capture single snapshot of currently scrubbed frame as PNG data URL
  */
 export function captureScrubbedSnapshot(
@@ -192,3 +441,4 @@ export function captureScrubbedSnapshot(
   applyWatermarkScrub(ctx, w, h, settings);
   return canvas.toDataURL('image/png');
 }
+
