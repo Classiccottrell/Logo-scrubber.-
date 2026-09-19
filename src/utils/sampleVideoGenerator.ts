@@ -101,7 +101,7 @@ export async function generateSampleVideo(
 
   const sampleFileName =
     type === 'social_reel'
-      ? `gemini-sample-reel.${extension}`
+      ? `corner-sample-reel.${extension}`
       : `sample-stock-clip.${extension}`;
 
   const file = new File([videoBlob], sampleFileName, {
@@ -252,7 +252,7 @@ function renderBottomRightWatermark(
     ctx.fillStyle = '#f8fafc';
     ctx.font = 'bold 12px "Plus Jakarta Sans", sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText('Gemini AI Video', badgeX + 38, badgeY + 16);
+    ctx.fillText('Demo Creator', badgeX + 38, badgeY + 16);
 
     ctx.fillStyle = '#94a3b8';
     ctx.font = '10px "Plus Jakarta Sans", sans-serif';

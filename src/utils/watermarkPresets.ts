@@ -2,9 +2,9 @@ import { WatermarkPreset } from '../types';
 
 export const WATERMARK_PRESETS: WatermarkPreset[] = [
   {
-    id: 'gemini_watermark',
-    name: 'Gemini Watermark (Default)',
-    description: 'Bottom-right Gemini sparkle emblem and text watermark',
+    id: 'corner_badge',
+    name: 'Corner Badge (Default)',
+    description: 'Bottom-right emblem and text watermark',
     zone: {
       widthPercent: 26,
       heightPercent: 9.5,

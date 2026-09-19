@@ -58,25 +58,30 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
   const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const animFrameIdRef = useRef<number | null>(null);
 
-  // Sync duration if provided
+  const onDurationChangeRef = useRef(onDurationChange);
+  onDurationChangeRef.current = onDurationChange;
+
+  const onTimeUpdateRef = useRef(onTimeUpdate);
+  onTimeUpdateRef.current = onTimeUpdate;
+
+  // Sync duration when video element emits metadata or duration changes
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !onDurationChange) return;
+    if (!video) return;
+
     const handleLoaded = () => {
-      if (video.duration && !isNaN(video.duration)) {
-        onDurationChange(video.duration);
+      if (video.duration && !isNaN(video.duration) && isFinite(video.duration)) {
+        onDurationChangeRef.current?.(video.duration);
       }
     };
-    if (video.duration && !isNaN(video.duration)) {
-      handleLoaded();
-    }
+
     video.addEventListener('loadedmetadata', handleLoaded);
     video.addEventListener('durationchange', handleLoaded);
     return () => {
       video.removeEventListener('loadedmetadata', handleLoaded);
       video.removeEventListener('durationchange', handleLoaded);
     };
-  }, [videoRef, onDurationChange]);
+  }, [videoRef]);
 
   const [dragMode, setDragMode] = useState<DragMode>('none');
   const [dragStart, setDragStart] = useState<{
@@ -199,6 +204,40 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
     }
   }, [videoRef, settings, viewMode, splitRatio, dragMode, isHoldingOriginal]);
 
+  const renderFrameRef = useRef(renderCurrentFrame);
+  renderFrameRef.current = renderCurrentFrame;
+
+  // Immediate redraw when visual settings, viewMode, or split changes
+  useEffect(() => {
+    renderCurrentFrame();
+  }, [renderCurrentFrame]);
+
+  // Re-render canvas frame on video hardware/decoder events
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const onFrameReady = () => {
+      renderFrameRef.current();
+    };
+
+    video.addEventListener('loadeddata', onFrameReady);
+    video.addEventListener('canplay', onFrameReady);
+    video.addEventListener('seeked', onFrameReady);
+    video.addEventListener('timeupdate', onFrameReady);
+
+    if (video.readyState >= 2) {
+      onFrameReady();
+    }
+
+    return () => {
+      video.removeEventListener('loadeddata', onFrameReady);
+      video.removeEventListener('canplay', onFrameReady);
+      video.removeEventListener('seeked', onFrameReady);
+      video.removeEventListener('timeupdate', onFrameReady);
+    };
+  }, [videoRef]);
+
   // Animation render loop during video playback
   useEffect(() => {
     let active = true;
@@ -206,23 +245,23 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
     const loop = () => {
       if (!active) return;
       if (videoRef.current) {
-        onTimeUpdate(videoRef.current.currentTime);
+        onTimeUpdateRef.current(videoRef.current.currentTime);
       }
-      renderCurrentFrame();
+      renderFrameRef.current();
       animFrameIdRef.current = requestAnimationFrame(loop);
     };
 
     if (isPlaying) {
       animFrameIdRef.current = requestAnimationFrame(loop);
     } else {
-      renderCurrentFrame();
+      renderFrameRef.current();
     }
 
     return () => {
       active = false;
       if (animFrameIdRef.current) cancelAnimationFrame(animFrameIdRef.current);
     };
-  }, [renderCurrentFrame, isPlaying, onTimeUpdate, videoRef]);
+  }, [isPlaying, videoRef]);
 
   // Helper to map mouse client coords to canvas internal coords
   const getCanvasMousePos = useCallback((clientX: number, clientY: number) => {

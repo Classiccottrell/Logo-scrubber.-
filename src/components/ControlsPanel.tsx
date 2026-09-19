@@ -14,7 +14,6 @@ import {
 import { ExportFormatChoice, ScrubMethod, ScrubSettings, TrimRange, VideoMetadata, WatermarkZone } from '../types';
 import { WATERMARK_PRESETS } from '../utils/watermarkPresets';
 import { detectSourceExtension } from '../utils/videoExporter';
-import { GeminiLogo } from './GeminiLogo';
 
 interface ControlsPanelProps {
   settings: ScrubSettings;
@@ -90,20 +89,20 @@ export const ControlsPanel: React.FC<ControlsPanelProps> = ({
           </label>
           <div className="grid grid-cols-2 gap-1.5">
             {WATERMARK_PRESETS.map((preset) => {
-              const isGemini = preset.id === 'gemini_watermark';
+              const isDefault = preset.id === 'corner_badge';
               return (
                 <button
                   key={preset.id}
                   onClick={() => applyPreset(preset.id)}
                   title={preset.description}
                   className={`px-2.5 py-2 rounded-lg text-left transition-all group ${
-                    isGemini
+                    isDefault
                       ? 'bg-sky-950/40 hover:bg-sky-900/40 border border-sky-500/40'
                       : 'bg-slate-800/80 hover:bg-slate-750 hover:border-sky-500/50 border border-slate-700/70'
                   }`}
                 >
                   <div className="text-xs font-medium text-slate-200 group-hover:text-sky-300 truncate flex items-center gap-1">
-                    {isGemini && <GeminiLogo className="w-3 h-3 text-sky-400 flex-shrink-0" />}
+                    {isDefault && <Sparkles className="w-3 h-3 text-sky-400 flex-shrink-0" />}
                     <span className="truncate">{preset.name}</span>
                   </div>
                   <div className="text-[10px] text-slate-400 font-mono mt-0.5">

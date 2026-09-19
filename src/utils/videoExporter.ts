@@ -146,15 +146,34 @@ export async function exportScrubbedVideo(
   // Standard high-performance MediaRecorder export
   return new Promise(async (resolve, reject) => {
     const video = document.createElement('video');
-    video.src = videoMeta.url;
     video.crossOrigin = 'anonymous';
     video.muted = false; // keep audio active for destination
     video.playsInline = true;
 
-    await new Promise<void>((res, rej) => {
-      video.onloadedmetadata = () => res();
-      video.onerror = (e) => rej(new Error('Failed to load video source for export: ' + e));
-    });
+    if (video.readyState < 1) {
+      await new Promise<void>((res, rej) => {
+        const onLoaded = () => {
+          cleanup();
+          res();
+        };
+        const onErr = (e: Event) => {
+          cleanup();
+          rej(new Error('Failed to load video source for export: ' + e));
+        };
+        const cleanup = () => {
+          video.removeEventListener('loadedmetadata', onLoaded);
+          video.removeEventListener('canplay', onLoaded);
+          video.removeEventListener('error', onErr);
+        };
+        video.addEventListener('loadedmetadata', onLoaded);
+        video.addEventListener('canplay', onLoaded);
+        video.addEventListener('error', onErr);
+        video.src = videoMeta.url;
+        video.load();
+      });
+    } else {
+      video.src = videoMeta.url;
+    }
 
     const vWidth = videoMeta.width || video.videoWidth || 1280;
     const vHeight = videoMeta.height || video.videoHeight || 720;
@@ -315,15 +334,34 @@ async function exportWithMp4Muxer(
   abortSignal?: { aborted: boolean }
 ): Promise<Blob> {
   const video = document.createElement('video');
-  video.src = videoMeta.url;
   video.crossOrigin = 'anonymous';
   video.muted = true;
   video.playsInline = true;
 
-  await new Promise<void>((res, rej) => {
-    video.onloadedmetadata = () => res();
-    video.onerror = (e) => rej(new Error('Failed to load video source for MP4 export: ' + e));
-  });
+  if (video.readyState < 1) {
+    await new Promise<void>((res, rej) => {
+      const onLoaded = () => {
+        cleanup();
+        res();
+      };
+      const onErr = (e: Event) => {
+        cleanup();
+        rej(new Error('Failed to load video source for MP4 export: ' + e));
+      };
+      const cleanup = () => {
+        video.removeEventListener('loadedmetadata', onLoaded);
+        video.removeEventListener('canplay', onLoaded);
+        video.removeEventListener('error', onErr);
+      };
+      video.addEventListener('loadedmetadata', onLoaded);
+      video.addEventListener('canplay', onLoaded);
+      video.addEventListener('error', onErr);
+      video.src = videoMeta.url;
+      video.load();
+    });
+  } else {
+    video.src = videoMeta.url;
+  }
 
   const vWidth = videoMeta.width || video.videoWidth || 1280;
   const vHeight = videoMeta.height || video.videoHeight || 720;

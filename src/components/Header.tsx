@@ -1,7 +1,6 @@
 import React from 'react';
-import { Film, Upload, Sparkles, RefreshCw } from 'lucide-react';
+import { Film, Upload, Sparkles, RefreshCw, Eraser } from 'lucide-react';
 import { VideoMetadata } from '../types';
-import { GeminiLogo } from './GeminiLogo';
 
 interface HeaderProps {
   videoMeta: VideoMetadata | null;
@@ -22,7 +21,7 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="bg-slate-900/90 border-b border-slate-800 backdrop-blur-md px-4 py-3 flex items-center justify-between sticky top-0 z-30">
       <div className="flex items-center gap-3">
         <div className="w-9 h-9 rounded-lg bg-sky-600 flex items-center justify-center text-white shadow-sm shadow-sky-500/25">
-          <GeminiLogo className="w-5 h-5" />
+          <Eraser className="w-5 h-5" />
         </div>
         <div>
           <div className="flex items-center gap-2">
@@ -72,10 +71,10 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <div>
                   <div className="font-medium flex items-center gap-1.5">
-                    <GeminiLogo className="w-3 h-3 text-sky-400" />
-                    <span>Gemini Sample</span>
+                    <Sparkles className="w-3 h-3 text-sky-400" />
+                    <span>Corner Badge Sample</span>
                   </div>
-                  <div className="text-[10px] text-slate-400">Gemini logo corner tag (Default)</div>
+                  <div className="text-[10px] text-slate-400">Corner logo watermark (Default)</div>
                 </div>
               </button>
               <button

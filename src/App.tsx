@@ -8,6 +8,7 @@ import { VideoUploader } from './components/VideoUploader';
 import { ExportModal } from './components/ExportModal';
 import { generateSampleVideo } from './utils/sampleVideoGenerator';
 import { exportScrubbedVideo, captureScrubbedSnapshot } from './utils/videoExporter';
+import { extractVideoMetadata } from './utils/videoLoader';
 
 const DEFAULT_SETTINGS: ScrubSettings = {
   zone: {
@@ -101,7 +102,7 @@ export default function App() {
       video.pause();
       setIsPlaying(false);
     }
-  }, [trimRange]);
+  }, [trimRange.start, trimRange.end]);
 
   // Sync video element volume and mute
   useEffect(() => {
@@ -111,10 +112,24 @@ export default function App() {
     }
   }, [volume, isMuted]);
 
-  // Trim range loop constraint
+  // Stable duration change handler preventing state update cascades
+  const handleDurationChange = useCallback((d: number) => {
+    if (!isFinite(d) || d <= 0) return;
+    setDuration((prev) => (Math.abs(prev - d) < 0.05 ? prev : d));
+    setTrimRange((prev) => {
+      const targetEnd = Math.min(d, prev.end || d);
+      if (Math.abs(prev.end - targetEnd) < 0.05) return prev;
+      return {
+        start: prev.start,
+        end: targetEnd,
+      };
+    });
+  }, []);
+
+  // Trim range loop constraint with debounced delta check
   const handleTimeUpdate = useCallback(
     (time: number) => {
-      setCurrentTime(time);
+      setCurrentTime((prev) => (Math.abs(prev - time) < 0.005 ? prev : time));
       const video = videoRef.current;
       if (!video) return;
 
@@ -127,7 +142,7 @@ export default function App() {
         }
       }
     },
-    [trimRange, isLooping]
+    [trimRange.start, trimRange.end, isLooping]
   );
 
   // Keyboard shortcuts
@@ -219,8 +234,8 @@ export default function App() {
       videoRef.current.pause();
       setIsPlaying(false);
     }
-    // Clean up previous blob URL if needed
-    if (videoMeta?.url && videoMeta.url.startsWith('blob:')) {
+    // Clean up previous blob URL if different
+    if (videoMeta?.url && videoMeta.url !== meta.url && videoMeta.url.startsWith('blob:')) {
       try {
         URL.revokeObjectURL(videoMeta.url);
       } catch {
@@ -232,7 +247,21 @@ export default function App() {
     const maxSegment = Math.min(meta.duration, 10);
     setTrimRange({ start: 0, end: maxSegment });
     setCurrentTime(0);
+    if (videoRef.current) {
+      videoRef.current.currentTime = 0;
+    }
   };
+
+  // Sync video source whenever videoMeta changes
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video && videoMeta?.url) {
+      if (video.src !== videoMeta.url) {
+        video.src = videoMeta.url;
+        video.load();
+      }
+    }
+  }, [videoMeta?.url]);
 
   // Snapshot Current Frame
   const handleTakeSnapshot = () => {
@@ -314,31 +343,55 @@ export default function App() {
       <input
         ref={fileInputRef}
         type="file"
-        accept="video/mp4,video/webm,video/quicktime,video/x-m4v"
+        accept="video/*,.mp4,.webm,.mov,.m4v,.mkv,.avi"
         className="hidden"
-        onChange={(e) => {
+        onChange={async (e) => {
           if (e.target.files && e.target.files.length > 0) {
             const file = e.target.files[0];
-            const url = URL.createObjectURL(file);
-            const temp = document.createElement('video');
-            temp.preload = 'metadata';
-            temp.src = url;
-            temp.onloadedmetadata = () => {
-              handleVideoLoaded({
-                file,
-                url,
-                name: file.name,
-                duration: temp.duration || 0,
-                width: temp.videoWidth || 1280,
-                height: temp.videoHeight || 720,
-                fps: 30,
-                sizeBytes: file.size,
-              });
-            };
-            temp.onerror = () => {
-              URL.revokeObjectURL(url);
-            };
+            try {
+              const meta = await extractVideoMetadata(file);
+              handleVideoLoaded(meta);
+            } catch (err) {
+              console.error('Header upload failed:', err);
+              alert((err as Error)?.message || 'Failed to read video file.');
+            }
             e.target.value = '';
+          }
+        }}
+      />
+
+      {/* Offscreen active video decoder element supporting playback & canvas rendering */}
+      <video
+        ref={videoRef}
+        src={videoMeta?.url}
+        preload="auto"
+        playsInline
+        crossOrigin="anonymous"
+        muted={isMuted}
+        className="fixed -top-[9999px] -left-[9999px] w-[1px] h-[1px] opacity-0 pointer-events-none"
+        onLoadedMetadata={(e) => {
+          const v = e.currentTarget;
+          if (v.duration && isFinite(v.duration) && v.duration > 0) {
+            handleDurationChange(v.duration);
+          }
+        }}
+        onDurationChange={(e) => {
+          const v = e.currentTarget;
+          if (v.duration && isFinite(v.duration) && v.duration > 0) {
+            handleDurationChange(v.duration);
+          }
+        }}
+        onTimeUpdate={(e) => {
+          handleTimeUpdate(e.currentTarget.currentTime);
+        }}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onEnded={() => {
+          if (isLooping && videoRef.current) {
+            videoRef.current.currentTime = trimRange.start;
+            videoRef.current.play().catch(() => {});
+          } else {
+            setIsPlaying(false);
           }
         }}
       />
@@ -370,13 +423,7 @@ export default function App() {
                 isPlaying={isPlaying}
                 currentTime={currentTime}
                 onTimeUpdate={handleTimeUpdate}
-                onDurationChange={(d: number) => {
-                  setDuration(d);
-                  setTrimRange((prev) => ({
-                    start: prev.start,
-                    end: Math.min(d, prev.end || d),
-                  }));
-                }}
+                onDurationChange={handleDurationChange}
               />
 
               <TimelineBar

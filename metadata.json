@@ -2,5 +2,5 @@
   "name": "Watermark Scrubber",
   "description": "Precision video editor designed to seamlessly scrub and remove bottom-right watermarks from short video segments with real-time preview and export.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": []
 }
