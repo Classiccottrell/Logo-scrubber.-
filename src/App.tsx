@@ -61,6 +61,8 @@ export default function App() {
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Set once the user picks a video/sample, so the slow auto-sample can't overwrite it
+  const userPickedVideoRef = useRef(false);
 
   // Auto-load sample video on first visit for instant demonstration
   useEffect(() => {
@@ -69,7 +71,7 @@ export default function App() {
       setIsLoadingSample(true);
       try {
         const sample = await generateSampleVideo('social_reel');
-        if (mounted) {
+        if (mounted && !userPickedVideoRef.current) {
           setVideoMeta(sample);
           setDuration(sample.duration);
           setTrimRange({ start: 0, end: sample.duration });
@@ -185,6 +187,7 @@ export default function App() {
 
   // Load custom sample
   const handleLoadSample = async (type: 'social_reel' | 'stock_clip') => {
+    userPickedVideoRef.current = true;
     setIsLoadingSample(true);
     if (isPlaying && videoRef.current) {
       videoRef.current.pause();
@@ -230,6 +233,7 @@ export default function App() {
 
   // Upload custom video
   const handleVideoLoaded = (meta: VideoMetadata) => {
+    userPickedVideoRef.current = true;
     if (isPlaying && videoRef.current) {
       videoRef.current.pause();
       setIsPlaying(false);
