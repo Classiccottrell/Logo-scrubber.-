@@ -46,6 +46,7 @@ src/
 
 ## Troubleshooting
 
+- **`npm install` fails with ERESOLVE:** Vite 8 expects `esbuild` `^0.27` or `^0.28`, but `package.json` pins `^0.25`. Run `npm install --legacy-peer-deps`, or change `esbuild` to `^0.28.0`.
 - **Uploaded video doesn't show:** check that you're on the latest `main` (`git pull`). Commit `eee3f08` dropped the hidden `<video>` element and left the canvas blank. `6a5e0e6` restored it.
 - **"Codec is not supported":** re-encode the clip with `ffmpeg -i in.mov -c:v libx264 -pix_fmt yuv420p out.mp4`.
 - **Demo sample stuck on "Generating…":** browsers pause canvas recording in background tabs. Keep the tab in the foreground.
